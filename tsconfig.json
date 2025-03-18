@@ -1,3 +1,8 @@
 {
+  "compilerOptions": {
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "allowImportingTsExtensions": true
+  },
   "extends": "@devvit/public-api/devvit.tsconfig.json"
 }
