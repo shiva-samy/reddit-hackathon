@@ -1,18 +1,20 @@
-import { Context, Devvit, useState } from '@devvit/public-api';
+import { Devvit, useState, useInterval } from '@devvit/public-api';
 
-export const Game: Devvit.CustomPostComponent = (context: Context) => {
+export const Game: Devvit.CustomPostComponent = () => {
   // State variables
   const [track, setTrack] = useState<'left' | 'center' | 'right'>('center'); // Current track
   const [symbol, setSymbol] = useState<'rock' | 'paper' | 'scissors' | null>(null); // User's chosen symbol
   const [score, setScore] = useState<number>(0); // Total score
   const [gameOver, setGameOver] = useState<boolean>(false); // Game over state
   const [lettersCollected, setLettersCollected] = useState<string[]>([]); // Letters collected by the user
-  const [obstacles, setObstacles] = useState<{ letter: string; symbol: 'rock' | 'paper' | 'scissors'; position: number; y: number }[]>([]); // Obstacles
+  const [lives, setLives] = useState<number>(3); // Lives remaining
+  const [obstacles, setObstacles] = useState<
+    { letter: string; symbol: 'rock' | 'paper' | 'scissors'; x: number; y: number; targetTrack: number }[]
+  >([]); // Obstacles
   const [speed, setSpeed] = useState<number>(1); // Speed of obstacles
 
   // Helper function to determine the result of a collision
   const calculatePoints = (userSymbol: 'rock' | 'paper' | 'scissors', obstacleSymbol: 'rock' | 'paper' | 'scissors'): number => {
-    // Winning combinations
     const winConditions = {
       rock: 'scissors',
       paper: 'rock',
@@ -22,7 +24,7 @@ export const Game: Devvit.CustomPostComponent = (context: Context) => {
     if (!symbol) return 0; // No symbol selected
     if (userSymbol === obstacleSymbol) return 1; // Tie
     if (winConditions[userSymbol] === obstacleSymbol) return 2; // Win
-    return 0; // Lose
+    return -1; // Lose
   };
 
   // Handle track change
@@ -43,7 +45,7 @@ export const Game: Devvit.CustomPostComponent = (context: Context) => {
   };
 
   // Handle collision
-  const handleCollision = (obstacle: { letter: string; symbol: 'rock' | 'paper' | 'scissors'; position: number }) => {
+  const handleCollision = (obstacle: { letter: string; symbol: 'rock' | 'paper' | 'scissors'; x: number; y: number; targetTrack: number }) => {
     if (!symbol) return;
 
     const points = calculatePoints(symbol, obstacle.symbol);
@@ -51,17 +53,13 @@ export const Game: Devvit.CustomPostComponent = (context: Context) => {
       setScore(score + points);
       setLettersCollected([...lettersCollected, obstacle.letter]);
       setSymbol(getRandomSymbol(symbol)); // Change user's symbol
-    } else {
-      setGameOver(true); // End the game
+    } else if (points === -1) {
+      setLives(lives - 1); // Lose a life
+      if (lives - 1 === 0) {
+        setGameOver(true); // End the game
+      }
     }
   };
-
-  // Helper function to map obstacle.y to a predefined padding value
-  function getPadding(y: number): 'small' | 'medium' | 'large' {
-    if (y < 33) return 'small';
-    if (y < 66) return 'medium';
-    return 'large';
-  }
 
   // Generate new obstacles
   const generateObstacle = () => {
@@ -69,52 +67,71 @@ export const Game: Devvit.CustomPostComponent = (context: Context) => {
     const symbols: ('rock' | 'paper' | 'scissors')[] = ['rock', 'paper', 'scissors'];
     const randomLetter = letters[Math.floor(Math.random() * letters.length)];
     const randomSymbol = symbols[Math.floor(Math.random() * symbols.length)];
-    const randomPosition = Math.floor(Math.random() * 3); // Random track (0: left, 1: center, 2: right)
-  
-    console.log('Generating obstacle:', { randomLetter, randomSymbol, randomPosition });
-  
+    const randomTargetTrack = Math.floor(Math.random() * 3); // Random target track (0: left, 1: center, 2: right)
+
+    console.log('Generating obstacle:', { randomLetter, randomSymbol, randomTargetTrack });
+
     setObstacles((prev) => [
       ...prev,
       {
         letter: randomLetter,
         symbol: randomSymbol,
-        position: randomPosition,
-        y: 0, // Start at the top of the screen
+        x: 50, // Start at the center horizontally
+        y: 0, // Start at the top vertically
+        targetTrack: randomTargetTrack, // Target track (0: left, 1: center, 2: right)
       },
     ]);
   };
 
-  // Move obstacles downward
+  // Move obstacles downward and toward their target track
   const moveObstacles = () => {
     setObstacles((prev) =>
-      prev.map((obstacle) => ({
-        ...obstacle,
-        y: obstacle.y + speed, // Move obstacle downward
-      })).filter((obstacle) => obstacle.y < 100) // Remove obstacles that go off-screen
+      prev
+        .map((obstacle) => {
+          const targetX = (obstacle.targetTrack * 33.33 + 16.67); // Calculate target X position (center of the track)
+          const deltaX = (targetX - obstacle.x) * 0.1; // Gradually move toward the target track
+          return {
+            ...obstacle,
+            x: obstacle.x + deltaX, // Move horizontally
+            y: obstacle.y + speed, // Move vertically
+          };
+        })
+        .filter((obstacle) => obstacle.y < 100) // Remove obstacles that go off-screen
     );
   };
 
-  // Check for collisions
+  // Check for collisions and missed obstacles
   const checkCollisions = () => {
-    obstacles.forEach((obstacle) => {
-      if (obstacle.position === ['left', 'center', 'right'].indexOf(track) && obstacle.y >= 90) {
-        handleCollision(obstacle);
-      }
+    setObstacles((prev) => {
+      return prev.filter((obstacle) => {
+        if (obstacle.targetTrack === ['left', 'center', 'right'].indexOf(track) && obstacle.y >= 90) {
+          handleCollision(obstacle);
+          return false; // Remove the obstacle after handling collision
+        }
+        if (obstacle.y >= 100) {
+          setLives(lives - 1); // Lose a life for missed obstacles
+          if (lives - 1 === 0) {
+            setGameOver(true); // End the game
+          }
+          return false; // Remove the obstacle if it goes off-screen
+        }
+        return true; // Keep the obstacle if no collision or miss
+      });
     });
   };
 
   // Use timers to handle obstacle generation and movement
-  context.useInterval(() => {
+  useInterval(() => {
     generateObstacle(); // Generate a new obstacle every interval
   }, 3000); // Generate an obstacle every 3 seconds
 
-  context.useInterval(() => {
+  useInterval(() => {
     moveObstacles(); // Move obstacles downward every interval
     checkCollisions(); // Check for collisions after moving obstacles
   }, 100); // Move obstacles every 100ms
 
   // Increase speed progressively
-  context.useInterval(() => {
+  useInterval(() => {
     setSpeed((prevSpeed) => prevSpeed + 0.1); // Gradually increase speed
   }, 10000); // Increase speed every 10 seconds
 
@@ -196,22 +213,40 @@ export const Game: Devvit.CustomPostComponent = (context: Context) => {
 
       {/* Obstacles */}
       <hstack height="100%" width="100%" alignment="center top" gap="small">
-      {obstacles.map((obstacle, index) => {
-        console.log('Rendering obstacle:', obstacle);
+        {obstacles.map((obstacle, index) => {
+          console.log('Rendering obstacle:', obstacle);
 
-        return (
-          <vstack
-            key={index.toString()}
-            height="100%"
-            width="33%"
-            alignment="top center"
-            padding={getPadding(obstacle.y)} // Map obstacle.y to a predefined padding value
-          >
-            <text size="large">{obstacle.letter}</text>
-            <text size="small">{obstacle.symbol}</text>
-          </vstack>
-        );
-      })}
+          // Map x position to alignment
+          const horizontalAlignment = obstacle.x < 33 ? 'start' : obstacle.x > 66 ? 'end' : 'center';
+
+          // Map y position to predefined padding classes
+          const verticalPaddingClass =
+            obstacle.y < 25
+              ? 'py-xs'
+              : obstacle.y < 50
+              ? 'py-sm'
+              : obstacle.y < 75
+              ? 'py-md'
+              : 'py-lg';
+
+          return (
+            <vstack
+              key={index.toString()}
+              height="100%"
+              width="33%"
+              alignment={`${horizontalAlignment} top`}
+              padding='small'
+            >
+              <text size="large">{obstacle.letter}</text>
+              <text size="small">{obstacle.symbol}</text>
+            </vstack>
+          );
+        })}
+      </hstack>
+
+      {/* Lives Display */}
+      <hstack height="10%" width="100%" alignment="top center" gap="small">
+        <text size="medium">Lives: {lives}</text>
       </hstack>
     </zstack>
   );
